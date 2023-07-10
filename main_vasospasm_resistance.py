@@ -670,8 +670,6 @@ def main(pinfo,case,num_cycle,select_file,select_vessel):
 
 #%%
 
+dCS_cleaned_bas,ddist_final_bas,dpoints_final_bas,dvectors_final_bas,dradii_final_bas, dpressure_bas = main('pt39','baseline',2,"a","a")
+dCS_cleaned_bas,ddist_final_bas,dpoints_final_bas,dvectors_final_bas,dradii_final_bas, dpressure_bas = main('pt40','vasospasm',2,"a","a")
 
-
-dCS_cleaned_bas,ddist_final_bas,dpoints_final_bas,dvectors_final_bas,dradii_final_bas, dpressure_bas = main('vsp16','vasospasm',2,"a","a")
-#dCS_cleaned_bas,ddist_final_bas,dpoints_final_bas,dvectors_final_bas,dradii_final_bas, dpressure_bas = main('pt28','vasospasm',2,"a","a")
-#dCS_cleaned_bas,ddist_final_bas,dpoints_final_bas,dvectors_final_bas,dradii_final_bas, dpressure_bas = main('pt33','vasospasm',2,"a","a")
