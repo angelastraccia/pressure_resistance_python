@@ -49,6 +49,24 @@ def load_dict(name):
         b = pickle.load(handle)
     return b
 
+def save_dict(dico, name):
+    """
+
+
+    Parameters
+    ----------
+    dico : dictionary one wants to save
+    name : str. path + name of the dictionary
+
+    Returns
+    -------
+    None.
+
+    """
+
+    with open(name + ".pkl", "wb") as f:
+        pickle.dump(dico, f)
+
 
 def get_list_files_dat(pinfo, case, num_cycle):
     """
@@ -183,7 +201,9 @@ def get_Q_final(pinfo, case, dpoints, num_cycle):
         dQ['Q_{}'.format("R_P1")] = dQ.get('Q_{}'.format("R_P2"))[:]
         
     else:
-        print('No modifications to collateral flow rates')         
+        print('No modifications to collateral flow rates')       
+        
+    save_dict(dQ, "L:/vasospasm/" + pinfo + "/" + case + "/4-results/pressure_resistance/flow_rates_" + pinfo + "_" + case)
 
     return dQ, list(dQ.keys())
 
@@ -482,7 +502,7 @@ def find_matching_distance(ddist_bas, ddist_vas, i_vessel):
     return bas_end_index, vas_end_index
 
 
-def calculate_resistance(pinfo, case, i_vessel, vessel_name, end_index, dresistance, dpressure, Q_final):
+def calculate_resistance(pinfo, case, i_vessel, vessel_name, end_index, dresistance, dpressure, Q_final,dinstantaneous):
 
     len_cycle = 30
     num_cycle = 2
@@ -495,12 +515,28 @@ def calculate_resistance(pinfo, case, i_vessel, vessel_name, end_index, dresista
     P_last = [dpressure.get("{}".format(data_indices[k])).get(
         "pressure{}".format(i_vessel))[1][1][1, end_index]
         for k in range(len_cycle)]
+    
+    deltaP_flip_direction_flag = [dpressure.get("{}".format(data_indices[k])).get(
+        "pressure{}".format(i_vessel))[1][0] for k in range(len_cycle)]
 
-    deltaP_instantaneous = np.subtract(P_0, P_last)
-    Q_instantaneous = np.abs(Q_final['Q_{}'.format(vessel_name)])
+    deltaP_instantaneous = np.abs(np.subtract(P_0, P_last)) # positive pressure
+    Q_instantaneous = np.abs(Q_final['Q_{}'.format(vessel_name)]) # positive flow rate
     R_instantaneous = np.divide(deltaP_instantaneous, Q_instantaneous)
+    
+    dinstantaneous_vessel = {}
+    dinstantaneous_vessel[vessel_name] = {"pressure_drop": deltaP_instantaneous, "flow_rate": Q_instantaneous, "resistance": R_instantaneous, "flip_direction_flag": deltaP_flip_direction_flag}
+    dinstantaneous.update(dinstantaneous_vessel)
+    
+    #% Exclude entries that blow up
+    R_median = np.median(R_instantaneous)
+    threshold = 5*R_median
+    R_instantaneous_new = []
+    
+    for r_local in R_instantaneous:
+        if r_local < threshold:
+            R_instantaneous_new.append(r_local)
 
-    dresistance["resistance{}".format(i_vessel)] = vessel_name, R_instantaneous
+    dresistance["resistance{}".format(i_vessel)] = vessel_name, R_instantaneous_new
 
     # Find mean pressure drop
     deltaP_mean = np.mean(deltaP_instantaneous)
@@ -509,9 +545,9 @@ def calculate_resistance(pinfo, case, i_vessel, vessel_name, end_index, dresista
     Q_mean = np.mean(Q_instantaneous)*60*1e6
     
     # Resistance [Pa/(mL/min)]
-    R_mean = np.mean(R_instantaneous)/(60*1e6)
+    R_mean = np.mean(R_instantaneous_new)/(60*1e6)
 
-    return dresistance, deltaP_mean, Q_mean, R_mean
+    return dresistance, deltaP_mean, Q_mean, R_mean, dinstantaneous
 
 
 
@@ -588,6 +624,7 @@ resistance_percent_difference_range = np.linspace(percent_diff_min,percent_diff_
 df_all_vessels = pd.DataFrame()
 df_colors_all_vessels = pd.DataFrame()
 dresistance_bas, dresistance_vas = {}, {}
+dinstantaneous_bas, dinstantaneous_vas = {}, {}
 
 num_vessels = len(dpoints_bas)
 
@@ -689,10 +726,10 @@ for i_vessel in range(num_vessels):
         bas_end_index, vas_end_index = find_matching_distance(
             ddist_bas, ddist_vas, i_vessel)
 
-        dresistance_bas, deltaP_mean_bas, Q_mean_bas, R_mean_bas = calculate_resistance(
-            pinfo, 'baseline', i_vessel, vessel_name, bas_end_index, dresistance_bas, dpressure_bas, Q_final_bas)
-        dresistance_vas, deltaP_mean_vas, Q_mean_vas, R_mean_vas = calculate_resistance(
-            pinfo, 'vasospasm', i_vessel, vessel_name, vas_end_index, dresistance_vas, dpressure_vas, Q_final_vas)
+        dresistance_bas, deltaP_mean_bas, Q_mean_bas, R_mean_bas, dinstantaneous_bas = calculate_resistance(
+            pinfo, 'baseline', i_vessel, vessel_name, bas_end_index, dresistance_bas, dpressure_bas, Q_final_bas, dinstantaneous_bas)
+        dresistance_vas, deltaP_mean_vas, Q_mean_vas, R_mean_vas, dinstantaneous_vas = calculate_resistance(
+            pinfo, 'vasospasm', i_vessel, vessel_name, vas_end_index, dresistance_vas, dpressure_vas, Q_final_vas, dinstantaneous_vas)
 
         percent_diff_deltaP = (deltaP_mean_vas-deltaP_mean_bas)/deltaP_mean_bas*100
         percent_diff_Q = (Q_mean_vas-Q_mean_bas)/Q_mean_bas*100
@@ -759,17 +796,56 @@ for t in ax4.texts: t.set_text(t.get_text() + " %")
 ax4.set_yticks([])
 ax4.set_title('Percent difference',fontsize=30)
 
-plt.savefig("L:/vasospasm/" + pinfo + "/baseline/4-results/pressure_resistance/figures/plot_heatmap_" + pinfo + ".png")
-plt.savefig("L:/vasospasm/" + pinfo + "/vasospasm/4-results/pressure_resistance/figures/plot_heatmap_" + pinfo + ".png")
+plt.savefig("L:/vasospasm/" + pinfo + "/baseline/4-results/pressure_resistance/figures/plot_heatmap_threshold_" + str(percent_diff_max) + "_" + pinfo + "_new.png")
+plt.savefig("L:/vasospasm/" + pinfo + "/vasospasm/4-results/pressure_resistance/figures/plot_heatmap_threshold_" + str(percent_diff_max) + "_" + pinfo + "_new.png")
 
 plt.tight_layout()
 
+## Save resistance
+save_dict(dresistance_bas, "L:/vasospasm/" + pinfo + "/" + "baseline/4-results/pressure_resistance/resistance_" + pinfo + "_baseline")
+save_dict(dresistance_vas, "L:/vasospasm/" + pinfo + "/" + "vasospasm/4-results/pressure_resistance/resistance_" + pinfo + "_vasospasm")
 
+## Save instantaneous values
+save_dict(dinstantaneous_bas, "L:/vasospasm/" + pinfo + "/" + "baseline/4-results/pressure_resistance/instantaneous_" + pinfo + "_baseline")
+save_dict(dinstantaneous_vas, "L:/vasospasm/" + pinfo + "/" + "vasospasm/4-results/pressure_resistance/instantaneous_"+ pinfo +"_vasospasm")
 
 # Export color data for percent change in resistance to CSV file
 
-df_colors_all_vessels.to_csv("L:/vasospasm/" + pinfo + "/baseline/4-results/pressure_resistance/" + pinfo + "_colors_resistance.csv")
-df_colors_all_vessels.to_csv("L:/vasospasm/" + pinfo + "/vasospasm/4-results/pressure_resistance/" + pinfo + "_colors_resistance.csv")
+df_colors_all_vessels.to_csv("L:/vasospasm/" + pinfo + "/baseline/4-results/pressure_resistance/" + pinfo + "_colors_resistance_threshold_" + str(percent_diff_max) + "_new.csv")
+df_colors_all_vessels.to_csv("L:/vasospasm/" + pinfo + "/vasospasm/4-results/pressure_resistance/" + pinfo + "_colors_resistance_threshold_" + str(percent_diff_max) + "_new.csv")
+
+
+
+
+#%%
+
+vessel_list = ["L_MCA","R_MCA","L_A2","R_A2","L_P2","R_P2","L_TICA","R_TICA","BAS",
+                "L_A1","R_A1","L_PCOM","R_PCOM","L_P1","R_P1"]
+
+df_percent_diff_all_vessels = pd.DataFrame()
+
+for vessel_of_interest in vessel_list:
+
+    # Create data frame with all vessels and percent change
+    
+    if vessel_of_interest in df_all_vessels.index:
+        
+        vessel_percent_diff_data = {vessel_of_interest: df_all_vessels.loc[vessel_of_interest,"resistance percent difference"]}
+        
+        print(df_all_vessels.loc[vessel_of_interest,"resistance percent difference"])
+         
+    else:
+        vessel_percent_diff_data = {vessel_of_interest: 'nan'}
+        print('missing')
+        
+    df_percent_diff_vessel =  pd.DataFrame(vessel_percent_diff_data, index=[pinfo])
+    
+    df_percent_diff_all_vessels = pd.concat([df_percent_diff_all_vessels, df_percent_diff_vessel],axis=1)
+
+resistance_path_vasospasm = "L:/vasospasm/" + pinfo + "/vasospasm/4-results/pressure_resistance/"
+
+df_percent_diff_all_vessels.to_csv(resistance_path_vasospasm + pinfo + "_resistance_percent_difference.csv")
+
 
 
 
